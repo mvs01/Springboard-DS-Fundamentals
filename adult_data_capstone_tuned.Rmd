@@ -1,0 +1,161 @@
+---
+title: "Untitled"
+author: "Mark Stallworth"
+date: "February 5, 2018"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+1. Business Understanding: Goal is to predict income greater than 50K based on attributes of the adult.data.txt dataset
+
+# Load the required packages and libraries
+```{r message=FALSE, echo=FALSE}
+#install.packages('caret', dependencies = TRUE)
+#install.packages('readr')
+#install.packages('dplyr')
+#install.packages('e1071')
+#install.packages('mice')
+#install.packages('gdata')
+#install.packages('psych')
+#install.packages('DMwR',dependencies = TRUE)
+library(caret)
+library(readr)
+library(e1071)
+library(ggplot2)
+library(dplyr)
+library(DMwR)
+library(mice)
+library(gdata)
+library(psych)
+```
+
+2. Data Understanding
+```{r message=FALSE, echo=FALSE}
+#Read the adult dataset into data.frame rawData without lables
+rawData <- read.table("C:/Springboard/DS Fundamentals/R Code/Capstone/data/adult.data.txt", header = FALSE, sep = ",")
+
+#Assign Labels
+names(rawData) <- c("age", "workclass", "fnlwwgt", "education", "education_num", "marital_status", "occupation", "relationship", "race", "sex", "capital_gain", "capital_loss", "hours_per_week", "native_country", "income50")
+```
+
+# Review data structures and browse data
+```{r message=FALSE, echo=FALSE}
+str(rawData)
+class(rawData)
+```
+
+# Data Exploration Factor Variables
+```{r message=FALSE, echo=FALSE}  
+select(rawData) %>% group_by(rawData$workclass) %>% summarise(count = n()) 
+select(rawData) %>% group_by(rawData$occupation) %>% summarise(count = n())
+select(rawData) %>% group_by(rawData$native_country) %>% summarise(count = n())
+```
+# Data Exploration Factor Variables with "?" in columns of observations select counts
+```{r message=FALSE, echo=FALSE}
+select(rawData) %>% group_by(rawData$workclass) %>% summarise(count = n()) 
+select(rawData) %>% group_by(rawData$occupation) %>% summarise(count = n())
+select(rawData) %>% group_by(rawData$native_country) %>% summarise(count = n())
+```
+
+# Check for missing values in integer columns:
+```{r message=FALSE}
+sum(is.null(rawData$age))
+sum(is.null(rawData$fnlwwgt))
+sum(is.null(rawData$education_num))
+sum(is.null(rawData$capital_gain))
+sum(is.null(rawData$capital_loss))
+sum(is.null(rawData$hours_per_week))
+```
+3 Data Preperation
+```{r message=FALSE}
+#identify factor variables with potential missing data and exclude label income50
+factor_idx = which(unlist(lapply(rawData, class)) == "factor")
+factor_idx_depvar <- (factor_idx[-9])  #remove column income50
+
+#Identify relative column number for factors to be used to replace "?" with "NA"
+for (i in 1:NROW(factor_idx_depvar)) {
+  naidx <- which(as.character(rawData[, factor_idx_depvar[i]]) == " ?")
+  rawData[naidx, factor_idx_depvar[i]] <- NA
+}
+#Drop category levels in order to remove "?" level and replace with NA; other wise imputaion substitutes "?" from original data
+rawData <- drop.levels(rawData)
+
+#replace NA values with K nearest neighbor
+rawDataClean <- knnImputation(rawData, 4)
+
+#Verify clean data for the 3 columns (workclass, occupation and native_country) that contains missing data in source input file (adult.data.txt)
+select(rawDataClean) %>% group_by(rawDataClean$workclass) %>% summarise(count = n()) 
+select(rawDataClean) %>% group_by(rawDataClean$occupation) %>% summarise(count = n())
+select(rawDataClean) %>% group_by(rawDataClean$native_country) %>% summarise(count = n())
+```
+4. Modeling
+```{r message=FALSE, echo=FALSE}
+preProcModel = preProcess(rawDataClean, method = c("center", "scale", "zv", "nzv"))
+processedData = predict(preProcModel, rawDataClean)
+class(processedData)
+dim(processedData)
+
+#Create dummy codes for factors, this is required for svm modeling
+processedData$workclass <- dummy.code(processedData$workclass)
+processedData$education <- dummy.code(processedData$education)
+processedData$marital_status <- dummy.code(processedData$marital_status)
+processedData$occupation <- dummy.code(processedData$occupation)
+processedData$relationship <- dummy.code(processedData$relationship)
+processedData$race <- dummy.code(processedData$race)
+processedData$sex <- dummy.code(processedData$sex)
+processedData$native_country <- dummy.code(processedData$native_country)
+```
+```{r message=FALSE}
+trainRows = sample(seq(1,nrow(processedData)),0.75*nrow(processedData))
+length(trainRows)
+
+trainData = processedData[trainRows,]
+dim(trainData)
+
+#Process a sample of training rows due to processing constraings and educational objective per Mentor
+trainData <- trainData[sample(1:nrow(trainData), 5000, replace=FALSE),]
+nrow(trainData)
+
+initialModel = svm(x=trainData[,1:(ncol(trainData)-1)],y=trainData[,ncol(trainData)])
+summary(initialModel)
+
+initialModelPredict <- predict(initialModel,trainData[,1:(ncol(trainData)-1)])
+str(initialModelPredict)
+NROW(initialModelPredict)
+
+svm.table <- table(initialModelPredict, trainData$income50)
+classAgreement(svm.table)
+confusionMatrix(svm.table)
+```
+5. Evaluation
+```{r message=FALSE, echo=FALSE}
+#testRows = setdiff(seq(1,nrow(inputData), trainRows)
+testRows = setdiff(seq(1, nrow(processedData)), trainRows)
+
+testData = processedData[testRows,]
+dim(testData)
+
+testModel <- svm(x=testData[,1:(ncol(trainData)-1)],y=testData[,ncol(testData)], cost = 1, gamma = 0.3678794)
+class(testModel)
+summary(testModel)
+
+testModelPredict <- predict(testModel,testData[,1:(ncol(testData)-1)])
+class(testModelPredict)
+summary(testModelPredict)
+
+tunedSvm.table <- table(testModelPredict, testData$income50)
+classAgreement(tunedSvm.table)
+confusionMatrix(tunedSvm.table)
+
+```
+
+
